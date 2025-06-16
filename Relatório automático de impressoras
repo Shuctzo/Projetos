@@ -1,0 +1,144 @@
+import os
+import smtplib
+import schedule
+import time
+from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from email.message import EmailMessage
+from PIL import Image, ImageDraw
+
+# -----------------------------
+# Configurações
+# -----------------------------
+setores = {
+    "Financeiro": "192.168.1.10",
+    "TI": "192.168.1.11",
+    "Laboratórios": "192.168.1.12",
+    "Fiscal": "192.168.1.13",
+    "Almoxarifado": "192.168.1.14",
+    "SESMT": "192.168.1.15",
+    "Administração": "192.168.1.16"
+}
+
+EMAIL_REMETENTE = "seuemail@gmail.com"
+EMAIL_SENHA_APP = "sua_senha_de_aplicativo"  # gerada no Gmail
+EMAIL_DESTINATARIO = "matheusshuctzo@gmail.com"
+
+CAMINHO_PRINTS = "prints"
+CAMINHO_PDF = "relatorio_impressoras.pdf"
+
+# -----------------------------
+# Captura a tela do contador da impressora
+# -----------------------------
+def capturar_prints():
+    os.makedirs(CAMINHO_PRINTS, exist_ok=True)
+    
+    # Configura navegador headless (sem abrir a janela)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(options=chrome_options)
+
+    for setor, ip in setores.items():
+        url = f"http://{ip}"  # Exemplo: http://192.168.1.10
+        try:
+            driver.get(url)
+            driver.save_screenshot(f"{CAMINHO_PRINTS}/{setor}.png")
+        except Exception as e:
+            print(f"Erro ao capturar print de {setor}: {e}")
+            # Cria uma imagem fallback com erro
+            img = Image.new("RGB", (600, 300), color="gray")
+            d = ImageDraw.Draw(img)
+            d.text((10, 10), f"Erro no setor {setor}\nIP: {ip}", fill=(255, 255, 255))
+            img.save(f"{CAMINHO_PRINTS}/{setor}.png")
+    
+    driver.quit()
+
+# -----------------------------
+# Geração do relatório em PDF
+# -----------------------------
+def gerar_pdf():
+    c = canvas.Canvas(CAMINHO_PDF, pagesize=A4)
+    width, height = A4
+
+    introducao = """
+    Relatório Técnico de Impressoras por Setor
+
+    Este relatório apresenta um levantamento automático dos contadores de páginas
+    das impressoras utilizadas pelos principais setores da empresa. As imagens foram
+    capturadas diretamente das interfaces web de cada impressora via IP, utilizando
+    automação com Selenium.
+
+    O objetivo é garantir controle eficiente de uso, manutenção preventiva e gestão
+    de suprimentos, com execução programada para todo dia 27 de cada mês.
+
+    Setores monitorados:
+    - Financeiro
+    - TI
+    - Laboratórios
+    - Fiscal
+    - Almoxarifado
+    - SESMT
+    - Administração
+    """
+
+    y = height - 50
+    for linha in introducao.strip().split("\n"):
+        c.drawString(50, y, linha.strip())
+        y -= 15
+    c.showPage()
+
+    for setor, ip in setores.items():
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height - 60, f"Setor: {setor}")
+        c.setFont("Helvetica", 12)
+        c.drawString(50, height - 80, f"Endereço IP: {ip}")
+        caminho_img = f"{CAMINHO_PRINTS}/{setor}.png"
+        c.drawImage(caminho_img, 50, height - 400, width=500, preserveAspectRatio=True)
+        c.showPage()
+
+    c.save()
+
+# -----------------------------
+# Envia o PDF por e-mail
+# -----------------------------
+def enviar_email():
+    msg = EmailMessage()
+    msg['Subject'] = 'Relatório de Impressoras - Setores'
+    msg['From'] = EMAIL_REMETENTE
+    msg['To'] = EMAIL_DESTINATARIO
+    msg.set_content("Segue em anexo o relatório automático gerado no dia 27.")
+
+    with open(CAMINHO_PDF, 'rb') as f:
+        pdf_data = f.read()
+        msg.add_attachment(pdf_data, maintype='application', subtype='pdf', filename="Relatorio_Impressoras.pdf")
+
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(EMAIL_REMETENTE, EMAIL_SENHA_APP)
+        smtp.send_message(msg)
+
+# -----------------------------
+# Função principal do processo
+# -----------------------------
+def executar_relatorio():
+    hoje = datetime.now()
+    if hoje.day == 27:
+        print("Executando rotina automática de relatório...")
+        capturar_prints()
+        gerar_pdf()
+        enviar_email()
+        print("Relatório enviado com sucesso!")
+    else:
+        print("Hoje não é dia 27. Aguardando...")
+
+# -----------------------------
+# Agendamento diário
+# -----------------------------
+schedule.every().day.at("08:00").do(executar_relatorio)
+
+# Loop de execução
+while True:
+    schedule.run_pending()
+    time.sleep(60)
